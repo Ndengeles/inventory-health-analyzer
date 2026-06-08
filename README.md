@@ -2,7 +2,7 @@
 
 **A SKU-level pipeline that finds where a warehouse loses money — *stockouts* (lost sales) on one side, *overstock* (tied-up capital) on the other — and pinpoints the reorder points that fix it.**
 
-Built on a fully reproducible simulation of a 50-SKU warehouse over two years, the project pairs a Python data pipeline with a SQL analytical layer to turn raw daily inventory movements into clear, money-ranked actions.
+Built on a fully reproducible simulation of a 50-SKU **equipment & spares** warehouse over two years — a realistic mix of serial-tracked capital equipment and bulk consumable spares — the project pairs a Python data pipeline with a SQL analytical layer to turn raw daily inventory movements into clear, money-ranked actions.
 
 **Demonstrates:** SQL analytics · Python (pandas) data pipelines · dimensional data modelling · supply-chain / inventory domain knowledge.
 
@@ -23,6 +23,11 @@ It surfaces, at a glance:
 
 ## How it works
 
+**Two stock classes, modelled differently:**
+
+- **Serialised** capital equipment (refrigeration units, compressors, display cabinets) — high-value, **intermittent** demand (most days zero), long lead times, tracked and ordered in whole units.
+- **Non-serialised** spares & consumables (filters, gaskets, fans, refrigerant) — high-volume, low-value, smooth demand with a weekly rhythm.
+
 The mechanism that makes the data realistic: the reorder policy is **set once** from an early policy window (the first ~120 days) and then **never revised** — the way a lot of real warehouses actually run. As demand drifts over the following ~18 months, the static policy falls out of sync:
 
 - Demand **grows** → policy too small → **stockouts** (lost sales).
@@ -38,13 +43,15 @@ reorder_point = avg_daily_demand × lead_time + z × σ × √lead_time
 
 | Metric | Value |
 |---|---|
-| SKUs / days simulated | 50 / 731 |
-| Ledger rows | 36,550 |
-| **Overall service level** | **88.4%** of demand met from stock |
-| Days with a stockout | 3,496 (9.6%) — across 47 SKUs |
-| Days with overstock | 851 (2.3%) — across 21 SKUs |
-| Total lost-sales value (margin) | ~1.04M |
-| Total overstock value (cost) | ~0.88M |
+| SKUs (serialised / non-serialised) | 50 (14 / 36) |
+| Days simulated · ledger rows | 731 · 36,550 |
+| **Overall service level** | **89.9%** of demand met from stock |
+| Days with a stockout | 1,818 (5.0% of ledger) |
+| Days with overstock | 1,121 (3.1% of ledger) |
+| Total lost-sales value (margin) | ~14.7M |
+| Total overstock value (cost) | ~8.6M — **90% of it in serialised capital** |
+
+The two stock classes fail in opposite directions: **serialised** equipment runs a lower service level (~80%) and holds the overwhelming majority of tied-up capital — the static safety-stock policy mis-sizes its lumpy demand — while **non-serialised** consumables drive most of the lost sales through frequent small stockouts.
 
 *Results are deterministic for a given seed — change `--seed` to model a different warehouse.*
 
@@ -90,7 +97,7 @@ A compact star schema (full DDL in [`schema.sql`](schema.sql)):
 
 | Table | Grain | Holds |
 |---|---|---|
-| `dim_sku` | one row per SKU | cost, price, lead time, supplier, demand-shape parameters |
+| `dim_sku` | one row per SKU | cost, price, lead time, supplier, tracking type (serialised / non-serialised), demand-shape parameters |
 | `fact_daily_demand` | SKU × day | true customer demand |
 | `fact_inventory` | SKU × day | on-hand, in-transit, orders, receipts, stockout/overstock units, days-of-cover, reorder point / order-up-to / safety stock, status flags, and money columns (`lost_sales_value`, `on_hand_value`, `overstock_value`) |
 
@@ -100,7 +107,7 @@ Generated data (`data/`, `inventory.db`) is git-ignored — it's fully reproduci
 
 ## Data note
 
-The dataset is **100% synthetic**. The demand backbone is generated per SKU (trend + weekly seasonality + Poisson noise); the SKU master and the day-by-day `(s, S)` inventory ledger are simulated on top of it. The pipeline is structured so the demand layer can be swapped for a real open dataset (e.g. Kaggle's *Store Item Demand Forecasting*) without touching the simulation or analytics layers.
+The dataset is **100% synthetic** — an invented equipment & spares warehouse with a realistic mix of serialised capital and non-serialised consumables. Non-serialised demand is smooth (trend + weekly seasonality + Poisson noise); serialised demand is intermittent (mostly-zero days). The SKU master and the day-by-day `(s, S)` inventory ledger are simulated on top. No real material numbers, serials, suppliers, customers, or values are used.
 
 ---
 
@@ -110,4 +117,4 @@ The dataset is **100% synthetic**. The demand backbone is generated per SKU (tre
 - [ ] **SQL analytics layer** — service level, ABC class, reorder-point recommendations, stockout/overstock flags, ranked action list
 - [ ] **Interactive dashboard** — Streamlit (overview KPIs · ABC · per-SKU detail · action list), published to a live URL
 
-**Scope:** one warehouse, ~50 SKUs, a single baseline policy. No multi-echelon, no real-time, no ML — kept deliberately tight so the analysis stays clear and defensible.
+**Scope:** one warehouse, ~50 SKUs, a single baseline policy. No multi-echelon, no real-time, no ML — kept deliberately tight so the analysis stays clear and defensible. Serialised items deliberately reuse the same safety-stock policy as a baseline; fitting their intermittent demand properly (e.g. Croston's method) is noted as future work.

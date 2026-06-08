@@ -25,6 +25,7 @@ CREATE TABLE dim_sku (
     sku_id            TEXT          PRIMARY KEY,
     sku_name          TEXT,
     category          TEXT,
+    tracking_type     TEXT,         -- 'serialised' | 'non-serialised'
     supplier          TEXT,
     unit_cost         NUMERIC(10,2),
     unit_price        NUMERIC(10,2),

@@ -29,7 +29,7 @@ import sys
 import pandas as pd
 
 EXPECTED = {
-    "skus.csv": ["sku_id", "category", "unit_cost", "unit_price", "lead_time_days"],
+    "skus.csv": ["sku_id", "category", "tracking_type", "unit_cost", "unit_price", "lead_time_days"],
     "daily_demand.csv": ["sku_id", "date", "demand_units"],
     "inventory_ledger.csv": ["sku_id", "date", "on_hand_units", "stockout_units"],
 }
@@ -43,6 +43,7 @@ CREATE TABLE dim_sku (
     sku_id            TEXT PRIMARY KEY,
     sku_name          TEXT,
     category          TEXT,
+    tracking_type     TEXT,
     supplier          TEXT,
     unit_cost         REAL,
     unit_price        REAL,
