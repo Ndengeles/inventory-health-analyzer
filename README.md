@@ -48,8 +48,7 @@ That single, defensible mechanism is what creates the money-losing patterns the 
 
 ## What's real vs simulated
 
-**100% synthetic — honest by design.** There is **no** AstraZeneca or EPTA data anywhere in this project, and no proprietary or customer data of any kind.
-
+**100% synthetic — honest by design.** 
 | Layer | Source |
 |---|---|
 | Demand backbone | **Simulated** — per-SKU `trend + weekly seasonality + noise` (Poisson draws). Realistic shape, invented numbers. |
