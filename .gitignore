@@ -1,0 +1,11 @@
+# Generated artifacts — reproducible via `python generate_data.py && python pipeline.py`
+data/
+*.db
+*.db-journal
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
