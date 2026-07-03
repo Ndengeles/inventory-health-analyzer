@@ -1,0 +1,99 @@
+name: dep-audit
+
+# Supply-chain gate — Security Team Phase 2.
+# Runs pip-audit / npm audit INSIDE the runner rather than calling GitHub's
+# Dependency Review API (that API needs GitHub Advanced Security, which is gated
+# on personal accounts / private repos). This mirrors the self-contained
+# gitleaks-action pattern already used for the secrets gate: the tool ships in
+# the job, so no GitHub entitlement is required and it works on private repos.
+#
+# Auto-detects manifests, so the same file is deployed verbatim to every repo:
+#   - every requirements*.txt  -> pip-audit
+#   - every package.json       -> npm audit --audit-level=high
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Discover requirements files
+        id: find
+        run: |
+          files=$(find . -type f -name 'requirements*.txt' \
+            -not -path '*/node_modules/*' -not -path '*/.venv/*' -not -path '*/venv/*' | sort)
+          if [ -z "$files" ]; then
+            echo "No requirements files — nothing to audit."
+            echo "found=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found:"; echo "$files"
+            echo "found=1" >> "$GITHUB_OUTPUT"
+            { echo 'files<<EOF'; echo "$files"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.find.outputs.found == '1'
+        with:
+          python-version: '3.x'
+      - name: Run pip-audit
+        if: steps.find.outputs.found == '1'
+        env:
+          FILES: ${{ steps.find.outputs.files }}
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          rc=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "::group::pip-audit $f"
+            pip-audit -r "$f" || rc=1
+            echo "::endgroup::"
+          done <<< "$FILES"
+          exit $rc
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Discover package.json
+        id: find
+        run: |
+          files=$(find . -type f -name 'package.json' -not -path '*/node_modules/*' | sort)
+          if [ -z "$files" ]; then
+            echo "No package.json — nothing to audit."
+            echo "found=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found:"; echo "$files"
+            echo "found=1" >> "$GITHUB_OUTPUT"
+            dirs=$(for f in $files; do dirname "$f"; done | sort -u)
+            { echo 'dirs<<EOF'; echo "$dirs"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.find.outputs.found == '1'
+        with:
+          node-version: '20'
+      - name: Run npm audit
+        if: steps.find.outputs.found == '1'
+        env:
+          DIRS: ${{ steps.find.outputs.dirs }}
+        run: |
+          rc=0
+          while IFS= read -r d; do
+            [ -z "$d" ] && continue
+            echo "::group::npm audit $d"
+            (
+              cd "$d"
+              if [ ! -f package-lock.json ] && [ ! -f npm-shrinkwrap.json ]; then
+                npm install --package-lock-only --ignore-scripts >/dev/null 2>&1 || true
+              fi
+              npm audit --audit-level=high
+            ) || rc=1
+            echo "::endgroup::"
+          done <<< "$DIRS"
+          exit $rc
