@@ -4,8 +4,6 @@
 
 Built on a fully reproducible simulation of a 50-SKU **equipment & spares** warehouse over two years — a realistic mix of serial-tracked capital equipment and bulk consumable spares — the project pairs a Python data pipeline with a SQL analytical layer to turn raw daily inventory movements into clear, money-ranked actions.
 
-**Demonstrates:** SQL analytics · Python (pandas) data pipelines · dimensional data modelling · supply-chain / inventory domain knowledge.
-
 ---
 
 ## The problem it solves
@@ -54,6 +52,66 @@ reorder_point = avg_daily_demand × lead_time + z × σ × √lead_time
 The two stock classes fail in opposite directions: **serialised** equipment runs a lower service level (~80%) and holds the overwhelming majority of tied-up capital — the static safety-stock policy mis-sizes its lumpy demand — while **non-serialised** consumables drive most of the lost sales through frequent small stockouts.
 
 *Results are deterministic for a given seed — change `--seed` to model a different warehouse.*
+
+---
+
+## The SQL analytics layer
+
+Four queries turn the raw ledger into money-ranked decisions. Each is a self-contained `.sql` file in [`sql/`](sql/); run any of them with `python run_query.py sql/<file>.sql`. Outputs below are from the default dataset (50 SKUs · 2 years · seed 42).
+
+### 1 · Overall service level — [`01_service_level.sql`](sql/01_service_level.sql)
+
+The single headline number: what share of total demand was met from stock.
+
+```
+service_level_pct
+-----------------
+89.9
+```
+
+### 2 · Worst-served SKUs — [`02_service_level_by_sku.sql`](sql/02_service_level_by_sku.sql)
+
+The same ratio per SKU, ranked worst-first — where the 89.9% is actually leaking. `GROUP BY` + a ratio aggregate.
+
+| sku_id | service_level_pct | total_demand |
+|---|--:|--:|
+| CND-1003 | 59.1 | 406 |
+| FAN-1046 | 65.1 | 64,797 |
+| RFG-1048 | 70.2 | 6,402 |
+| DSP-1002 | 73.9 | 211 |
+| DSP-1035 | 74.6 | 67 |
+
+*(top 5 of 10)* — note FAN-1046: a low service level **and** huge demand is the dangerous combination the action list flags first.
+
+### 3 · ABC classification — [`03_abc_class.sql`](sql/03_abc_class.sql)
+
+Pareto by revenue using window functions (`SUM() OVER (ORDER BY revenue DESC)` for a running cumulative %), then a `CASE` cut at 80% / 95%.
+
+| Class | SKUs | Share of revenue |
+|---|--:|--:|
+| **A** | 5 (10%) | first 77.5% |
+| **B** | 13 (26%) | next ~18% |
+| **C** | 32 (64%) | last ~5% |
+
+Five SKUs — led by FAN-1046 (30% of all revenue on its own) — carry most of the value; two-thirds of the catalogue is the long tail.
+
+### 4 · Reorder points & action list — [`04_reorder_points.sql`](sql/04_reorder_points.sql)
+
+The deliverable. `ROW_NUMBER()` isolates each SKU's latest ledger row for its current state, joined to period lost-sales totals, with a `CASE` that scores each flagged SKU by money at stake (lost sales if stocked out, tied-up capital if overstocked) — then ranks the whole action list by `impact_value`.
+
+| SKU | Name | On hand | Reorder point | Direction | Impact |
+|---|---|--:|--:|---|--:|
+| FAN-1046 | Fan / Motor 047 | 0 | 1,983 | 🔴 stockout | 12,227,120 |
+| CND-1034 | Condensing Unit 035 | 0 | 47 | 🔴 stockout | 655,491 |
+| CND-1003 | Condensing Unit 004 | 0 | 12 | 🔴 stockout | 51,892 |
+| FAN-1033 | Fan / Motor 034 | 73 | 48 | 🟡 overstock | 12,080 |
+| RFG-1022 | Refrigerant 023 | 372 | 282 | 🟡 overstock | 4,951 |
+| CMP-1031 | Compressor 032 | 4 | 4 | 🟡 overstock | 3,804 |
+| CND-1024 | Condensing Unit 025 | 4 | 3 | 🟡 overstock | 1,479 |
+| FAN-1018 | Fan / Motor 019 | 52 | 50 | 🟡 overstock | 1,375 |
+| GSK-1030 | Gasket / Seal 031 | 471 | 267 | 🟡 overstock | 50 |
+
+Nine SKUs need action — 3 stocked out, 6 overstocked. The list is dominated by **FAN-1046**: stocked out with a recommended reorder point of ~1,983 units, it alone accounts for 12.2M in lost sales. That is the one SKU to fix first.
 
 ---
 
@@ -114,7 +172,7 @@ The dataset is **100% synthetic** — an invented equipment & spares warehouse w
 ## Roadmap
 
 - [x] **Data + pipeline** — synthetic generator, ingest/validate, SQLite load
-- [ ] **SQL analytics layer** — service level, ABC class, reorder-point recommendations, stockout/overstock flags, ranked action list
-- [ ] **Interactive dashboard** — Streamlit (overview KPIs · ABC · per-SKU detail · action list), published to a live URL
+- [x] **SQL analytics layer** — service level, ABC class, reorder-point recommendations, stockout/overstock flags, ranked action list
+- [ ] **Interactive dashboard** — Streamlit (overview KPIs · ABC · per-SKU detail · action list), published to a live URL — *possible v2*
 
 **Scope:** one warehouse, ~50 SKUs, a single baseline policy. No multi-echelon, no real-time, no ML — kept deliberately tight so the analysis stays clear and defensible. Serialised items deliberately reuse the same safety-stock policy as a baseline; fitting their intermittent demand properly (e.g. Croston's method) is noted as future work.
